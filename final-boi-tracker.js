@@ -2,6 +2,7 @@
 (() => {
   const KEY = 'finalBoiSyllabusProgressV1';
   const statuses = ['Not started', 'Learning', 'Practising', 'Revision required', 'Completed'];
+  const statusKey = value => value.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
   const sections = [
     ['Priority 1 — Core Java', [
       ['Java fundamentals', 'Java features and platform independence|JDK, JRE and JVM|Compilation and execution process|Primitive and non-primitive data types|Variables, scope and type casting|Operators and expressions|Conditional statements and loops|Arrays and multidimensional arrays|Methods, parameters, return types and overloading|Static and instance members|Constructors and constructor overloading|Packages and access modifiers'],
@@ -88,6 +89,7 @@
   const host = () => document.getElementById('finalBoiContent');
   function render() {
     if (!host()) return;
+    const openSections = new Set([...host().querySelectorAll('details[data-final-boi-section][open]')].map(el => el.dataset.finalBoiSection));
     const progress = read();
     const complete = all.filter(x => progress[x.id]?.status === 'Completed').length;
     document.getElementById('finalBoiOverall').textContent = `${complete} of ${all.length} subtopics completed`;
@@ -95,10 +97,10 @@
     host().innerHTML = sections.map(([section, groups], si) => {
       const sectionItems = all.filter(x => x.section === section);
       const done = sectionItems.filter(x => progress[x.id]?.status === 'Completed').length;
-      return `<details class="boi-area final-boi-area" ${si === 0 ? 'open' : ''}><summary><span><strong>${section}</strong><em class="boi-inferred">Preparation syllabus</em></span><small>${done} / ${sectionItems.length} complete</small></summary><div class="boi-area-body">${groups.map(([group]) => {
+      return `<details class="boi-area final-boi-area" data-final-boi-section="${si}" ${openSections.size ? openSections.has(String(si)) ? 'open' : '' : si === 0 ? 'open' : ''}><summary><span><strong>${section}</strong><em class="boi-inferred">Preparation syllabus</em></span><small>${done} / ${sectionItems.length} complete</small></summary><div class="boi-area-body">${groups.map(([group]) => {
         const items = sectionItems.filter(x => x.group === group);
         const groupDone = items.filter(x => progress[x.id]?.status === 'Completed').length;
-        return `<details class="boi-topic" open><summary><span>${group}</span><small>${groupDone} / ${items.length}</small></summary><div class="final-boi-items">${items.map(item => `<label class="final-boi-item"><span>${item.label}</span><select aria-label="Status for ${item.label.replaceAll('"', '&quot;')}" data-final-boi="${item.id}">${statuses.map(status => `<option${(progress[item.id]?.status || statuses[0]) === status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>`).join('')}</div></details>`;
+        return `<details class="boi-topic" open><summary><span>${group}</span><small>${groupDone} / ${items.length}</small></summary><div class="final-boi-items">${items.map(item => { const current = progress[item.id]?.status || statuses[0]; return `<label class="final-boi-item"><span>${item.label}</span><select class="final-boi-status" data-status="${statusKey(current)}" aria-label="Status for ${item.label.replaceAll('"', '&quot;')}" data-final-boi="${item.id}">${statuses.map(status => `<option data-status="${statusKey(status)}"${current === status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>`; }).join('')}</div></details>`;
       }).join('')}</div></details>`;
     }).join('');
   }
