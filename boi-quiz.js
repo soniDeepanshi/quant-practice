@@ -25,7 +25,10 @@
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved = () => { try { const x = JSON.parse(localStorage.getItem(KEY) || '{}'); return x && typeof x === 'object' ? x : {}; } catch { return {}; } };
   let saved = getSaved();
-  let index = Math.max(0, Math.min(QUESTIONS.length - 1, Number(saved.index) || 0));
+  const topicNames = [...new Set(QUESTIONS.map(q => q.topic || 'Locators'))];
+  let selectedTopic = topicNames.includes(saved.topic) ? saved.topic : (topicNames[0] || '__all');
+  const positions = saved.positions && typeof saved.positions === 'object' ? {...saved.positions} : {[selectedTopic]: Number(saved.index) || 0};
+  let index = Math.max(0, Math.min(QUESTIONS.length - 1, Number(positions[selectedTopic]) || 0));
   let solved = new Set(Array.isArray(saved.solved) ? saved.solved : []);
   let selection = new Set();
   let submitted = false;
@@ -33,7 +36,18 @@
   const root = document.getElementById('boiQuizContent');
   const progress = document.getElementById('boiQuizProgress');
   const bar = document.getElementById('boiQuizBar');
-  function save() { localStorage.setItem(KEY, JSON.stringify({index, solved:[...solved]})); }
+  const topicSelect = document.getElementById('boiQuizTopic');
+  topicSelect.innerHTML = `<option value="__all">All topics</option>${topicNames.map(topic=>`<option value="${escape(topic)}">${escape(topic)}</option>`).join('')}`;
+  topicSelect.value = selectedTopic;
+  function currentQuestions() { return selectedTopic === '__all' ? QUESTIONS : QUESTIONS.filter(q => (q.topic || 'Locators') === selectedTopic); }
+  function save() { positions[selectedTopic]=index; localStorage.setItem(KEY, JSON.stringify({topic:selectedTopic,index,positions,solved:[...solved]})); }
+  function switchTopic(topic) {
+    positions[selectedTopic]=index;
+    selectedTopic=topic;
+    index=Math.max(0,Number(positions[selectedTopic])||0);
+    selection.clear();submitted=false;revealSolved=false;save();render();
+  }
+  topicSelect.onchange=()=>switchTopic(topicSelect.value);
   function startQuiz() {
     document.getElementById('boiQuizTab').classList.add('active');
     document.getElementById('boiQuizTab').setAttribute('aria-pressed','true');
@@ -45,15 +59,18 @@
     render();
   }
   function render() {
-    const completed=solved.size;
-    progress.textContent=`${completed} of ${QUESTIONS.length} correct`;
-    bar.style.width=`${completed/QUESTIONS.length*100}%`;
-    if(completed===QUESTIONS.length&&!revealSolved){
-      root.innerHTML=`<section class="boi-quiz-finish"><span class="pill">LOCATORS · BATCHES 1–2</span><h3>Quiz complete</h3><p>${completed}/${QUESTIONS.length} correct · Each seven-point review appeared after its correct answer.</p><button type="button" class="boi-quiz-next" id="boiQuizRestart">Start again</button></section>`;
-      document.getElementById('boiQuizRestart').onclick=()=>{solved.clear();index=0;selection.clear();save();render();};return;
+    const list=currentQuestions();
+    const completed=list.filter(q=>solved.has(q.id)).length;
+    progress.textContent=`${completed} of ${list.length} correct`;
+    bar.style.width=`${completed/list.length*100}%`;
+    document.getElementById('boiQuizTopicTitle').textContent=selectedTopic==='__all'?'All topics':selectedTopic;
+    if(completed===list.length&&!revealSolved){
+      root.innerHTML=`<section class="boi-quiz-finish"><span class="pill">${escape(selectedTopic==='__all'?'ALL TOPICS':selectedTopic.toUpperCase())}</span><h3>Quiz complete</h3><p>${completed}/${list.length} correct · Each seven-point review appeared after its correct answer.</p><button type="button" class="boi-quiz-next" id="boiQuizRestart">Start again</button></section>`;
+      document.getElementById('boiQuizRestart').onclick=()=>{list.forEach(q=>solved.delete(q.id));index=0;selection.clear();revealSolved=false;save();render();};return;
     }
-    if(!revealSolved)while(solved.has(QUESTIONS[index].id)) index=(index+1)%QUESTIONS.length;
-    const q=QUESTIONS[index], isSolved=solved.has(q.id);
+    if(index>=list.length)index=0;
+    if(!revealSolved)while(solved.has(list[index].id)) index=(index+1)%list.length;
+    const q=list[index], isSolved=solved.has(q.id);
     const answeredText=ids=>ids.map(id=>`${id}: ${q.options.find(o=>o[0]===id)?.[1]||''}`).join('; ');
     const reviews=[
       ['2. Your answer vs correct answer',`Your answer: ${answeredText(q.previousAnswer||q.answer)}<br>Correct answer: ${answeredText(q.answer)}`],
@@ -64,7 +81,7 @@
       ['7. Exam takeaway',q.takeaway]
     ];
     const options=q.options.map(([id,text])=>`<button type="button" class="boi-quiz-option ${isSolved&&q.answer.includes(id)?'is-correct':''}" data-quiz-option="${id}" aria-pressed="false"><span class="boi-quiz-letter">${id}</span><span>${escape(text)}</span></button>`).join('');
-    root.innerHTML=`<article class="boi-quiz-question"><div class="boi-quiz-qhead"><span class="pill">${escape(q.id)} · ${escape(q.title)}</span><span>Question ${index+1} of ${QUESTIONS.length}</span></div><h3 class="boi-quiz-prompt">${escape(q.question)}</h3>${q.multi?'<p class="boi-quiz-hint">Select all that apply, then check your answer.</p>':''}<div class="boi-quiz-options">${options}</div>${q.multi?'<button type="button" class="boi-quiz-next" id="boiQuizCheck">Check answer</button>':''}<div id="boiQuizFeedback" aria-live="polite">${isSolved?`<p class="boi-quiz-correct-note">Correct — your seven-point review:</p><div class="boi-quiz-reviews">${reviews.map(([title,body])=>`<section><h4>${escape(title)}</h4><p>${body.includes('<br>')?body:escape(body).replace(/\n/g,'<br>')}</p></section>`).join('')}</div><button type="button" class="boi-quiz-next" id="boiQuizNext">Next question →</button>`:''}</div></article>`;
+    root.innerHTML=`<article class="boi-quiz-question"><div class="boi-quiz-qhead"><span class="pill">${escape(q.id)} · ${escape(q.title)}</span><span>Question ${index+1} of ${list.length}</span></div><h3 class="boi-quiz-prompt">${escape(q.question)}</h3>${q.multi?'<p class="boi-quiz-hint">Select all that apply, then check your answer.</p>':''}<div class="boi-quiz-options">${options}</div>${q.multi?'<button type="button" class="boi-quiz-next" id="boiQuizCheck">Check answer</button>':''}<div id="boiQuizFeedback" aria-live="polite">${isSolved?`<p class="boi-quiz-correct-note">Correct — your seven-point review:</p><div class="boi-quiz-reviews">${reviews.map(([title,body])=>`<section><h4>${escape(title)}</h4><p>${body.includes('<br>')?body:escape(body).replace(/\n/g,'<br>')}</p></section>`).join('')}</div><button type="button" class="boi-quiz-next" id="boiQuizNext">Next question →</button>`:''}</div></article>`;
     root.querySelectorAll('[data-quiz-option]').forEach(button=>button.onclick=()=>{
       if(isSolved||submitted)return;
       const id=button.dataset.quizOption;
@@ -72,10 +89,10 @@
       else check([id]);
     });
     if(q.multi)document.getElementById('boiQuizCheck').onclick=()=>check([...selection]);
-    if(isSolved)document.getElementById('boiQuizNext').onclick=()=>{index=(index+1)%QUESTIONS.length;selection.clear();submitted=false;revealSolved=false;save();render();};
+    if(isSolved)document.getElementById('boiQuizNext').onclick=()=>{index=(index+1)%list.length;selection.clear();submitted=false;revealSolved=false;save();render();};
   }
   function check(chosen) {
-    const q=QUESTIONS[index];
+    const q=currentQuestions()[index];
     const correct=[...q.answer].sort().join('|')===[...chosen].sort().join('|');
     if(!correct){
       submitted=false;
