@@ -34,84 +34,33 @@
   const KEY = 'quantPracticeBoiQuizLocatorsBatch1';
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved = () => { try { const x = JSON.parse(localStorage.getItem(KEY) || '{}'); return x && typeof x === 'object' ? x : {}; } catch { return {}; } };
-  let saved = getSaved();
-  const topicNames = [...new Set(QUESTIONS.map(q => q.topic || 'Locators'))];
-  let selectedTopic = topicNames.includes(saved.topic) ? saved.topic : (topicNames[0] || '__all');
-  const positions = saved.positions && typeof saved.positions === 'object' ? {...saved.positions} : {[selectedTopic]: Number(saved.index) || 0};
-  let index = Math.max(0, Math.min(QUESTIONS.length - 1, Number(positions[selectedTopic]) || 0));
+  const saved = getSaved();
+  const groupKey = q => `${q.topic || 'Locators'}::${Number(q.batch) || 1}`;
+  const groups = [...new Set(QUESTIONS.map(groupKey))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  const groupLabel = key => { const [topic,batch]=key.split('::'); return `${topic} · Batch ${batch}`; };
+  let selectedGroups = Array.isArray(saved.groups) ? saved.groups.filter(g=>groups.includes(g)) : [];
   let solved = new Set(Array.isArray(saved.solved) ? saved.solved : []);
-  let selection = new Set();
-  let submitted = false;
-  let revealSolved = false;
-  const root = document.getElementById('boiQuizContent');
-  const progress = document.getElementById('boiQuizProgress');
-  const bar = document.getElementById('boiQuizBar');
-  const topicSelect = document.getElementById('boiQuizTopic');
-  topicSelect.innerHTML = `<option value="__all">All topics</option>${topicNames.map(topic=>`<option value="${escape(topic)}">${escape(topic)}</option>`).join('')}`;
-  topicSelect.value = selectedTopic;
-  function currentQuestions() { return selectedTopic === '__all' ? QUESTIONS : QUESTIONS.filter(q => (q.topic || 'Locators') === selectedTopic); }
-  function save() { positions[selectedTopic]=index; localStorage.setItem(KEY, JSON.stringify({topic:selectedTopic,index,positions,solved:[...solved]})); }
-  function switchTopic(topic) {
-    positions[selectedTopic]=index;
-    selectedTopic=topic;
-    index=Math.max(0,Number(positions[selectedTopic])||0);
-    selection.clear();submitted=false;revealSolved=false;save();render();
+  let order = Array.isArray(saved.order) ? saved.order.filter(id=>QUESTIONS.some(q=>q.id===id)) : [];
+  let index = Math.max(0, Number(saved.index)||0), selection = new Set(), submitted=false, revealSolved=Boolean(saved.revealSolved);
+  const root=document.getElementById('boiQuizContent'), progress=document.getElementById('boiQuizProgress'), bar=document.getElementById('boiQuizBar');
+  const toggle=document.getElementById('boiQuizTopicToggle'), menu=document.getElementById('boiQuizTopicMenu'), label=document.getElementById('boiQuizTopicLabel'), options=document.getElementById('boiQuizTopicOptions'), allBox=document.getElementById('boiQuizAllTopics');
+  function chosenQuestions(){return QUESTIONS.filter(q=>selectedGroups.length===0||selectedGroups.includes(groupKey(q)));}
+  function shuffle(items){const out=[...items];for(let i=out.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[out[i],out[j]]=[out[j],out[i]];}return out;}
+  function syncPicker(){
+    allBox.checked=selectedGroups.length===0;
+    options.innerHTML=groups.map(g=>`<label class="boi-quiz-topic-option"><input type="checkbox" value="${escape(g)}" ${selectedGroups.includes(g)?'checked':''}><span>${escape(groupLabel(g))}</span></label>`).join('');
+    label.textContent=selectedGroups.length===0?'All topics':selectedGroups.length===1?groupLabel(selectedGroups[0]):`${selectedGroups.length} batches selected`;
+    document.getElementById('boiQuizTopicTitle').textContent=selectedGroups.length===0?'All topics':selectedGroups.length===1?groupLabel(selectedGroups[0]):'Selected BOI batches';
+    options.querySelectorAll('input').forEach(box=>box.onchange=()=>{selectedGroups=[...options.querySelectorAll('input:checked')].map(x=>x.value);if(selectedGroups.length===groups.length)selectedGroups=[];beginRun();});
   }
-  topicSelect.onchange=()=>switchTopic(topicSelect.value);
-  function startQuiz() {
-    document.getElementById('boiQuizTab').classList.add('active');
-    document.getElementById('boiQuizTab').setAttribute('aria-pressed','true');
-    const examTab=document.getElementById('examTab'); examTab.classList.remove('active'); examTab.setAttribute('aria-pressed','false');
-    document.querySelector('.shell').classList.add('exam-mode');
-    const layout=document.querySelector('.layout'); layout.classList.add('exam-mode','quiz-mode');
-    ['practiceView','learnView','bookmarksView','notesView','notebookView','examView','boiView','finalBoiView'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
-    document.getElementById('boiQuizView').style.display='block';
-    render();
-  }
-  function render() {
-    const list=currentQuestions();
-    const completed=list.filter(q=>solved.has(q.id)).length;
-    progress.textContent=`${completed} of ${list.length} correct`;
-    bar.style.width=`${completed/list.length*100}%`;
-    document.getElementById('boiQuizTopicTitle').textContent=selectedTopic==='__all'?'All topics':selectedTopic;
-    if(completed===list.length&&!revealSolved){
-      root.innerHTML=`<section class="boi-quiz-finish"><span class="pill">${escape(selectedTopic==='__all'?'ALL TOPICS':selectedTopic.toUpperCase())}</span><h3>Quiz complete</h3><p>${completed}/${list.length} correct · Each seven-point review appeared after its correct answer.</p><button type="button" class="boi-quiz-next" id="boiQuizRestart">Start again</button></section>`;
-      document.getElementById('boiQuizRestart').onclick=()=>{list.forEach(q=>solved.delete(q.id));index=0;selection.clear();revealSolved=false;save();render();};return;
-    }
-    if(index>=list.length)index=0;
-    if(!revealSolved)while(solved.has(list[index].id)) index=(index+1)%list.length;
-    const q=list[index], isSolved=solved.has(q.id);
-    const answeredText=ids=>ids.map(id=>`${id}: ${q.options.find(o=>o[0]===id)?.[1]||''}`).join('; ');
-    const reviews=[
-      ['2. Your answer vs correct answer',`Your answer: ${answeredText(q.previousAnswer||q.answer)}<br>Correct answer: ${answeredText(q.answer)}`],
-      ['3. Exact expected output',q.expected],
-      ['4. Step-by-step execution',q.steps],
-      ['5. Concept explained from basics',q.concept],
-      ['6. Explanation of every option',q.optionReview],
-      ['7. Exam takeaway',q.takeaway]
-    ];
-    const options=q.options.map(([id,text])=>`<button type="button" class="boi-quiz-option ${isSolved&&q.answer.includes(id)?'is-correct':''}" data-quiz-option="${id}" aria-pressed="false"><span class="boi-quiz-letter">${id}</span><span>${escape(text)}</span></button>`).join('');
-    root.innerHTML=`<article class="boi-quiz-question"><div class="boi-quiz-qhead"><span class="pill">${escape(q.id)} · ${escape(q.title)}</span><span>Question ${index+1} of ${list.length}</span></div><h3 class="boi-quiz-prompt">${escape(q.question)}</h3>${q.multi?'<p class="boi-quiz-hint">Select all that apply, then check your answer.</p>':''}<div class="boi-quiz-options">${options}</div>${q.multi?'<button type="button" class="boi-quiz-next" id="boiQuizCheck">Check answer</button>':''}<div id="boiQuizFeedback" aria-live="polite">${isSolved?`<p class="boi-quiz-correct-note">Correct — your seven-point review:</p><div class="boi-quiz-reviews">${reviews.map(([title,body])=>`<section><h4>${escape(title)}</h4><p>${body.includes('<br>')?body:escape(body).replace(/\n/g,'<br>')}</p></section>`).join('')}</div><button type="button" class="boi-quiz-next" id="boiQuizNext">Next question →</button>`:''}</div></article>`;
-    root.querySelectorAll('[data-quiz-option]').forEach(button=>button.onclick=()=>{
-      if(isSolved||submitted)return;
-      const id=button.dataset.quizOption;
-      if(q.multi){if(selection.has(id))selection.delete(id);else selection.add(id);button.classList.toggle('is-selected',selection.has(id));button.classList.remove('is-wrong');button.setAttribute('aria-pressed',String(selection.has(id)));}
-      else check([id]);
-    });
-    if(q.multi)document.getElementById('boiQuizCheck').onclick=()=>check([...selection]);
-    if(isSolved)document.getElementById('boiQuizNext').onclick=()=>{index=(index+1)%list.length;selection.clear();submitted=false;revealSolved=false;save();render();};
-  }
-  function check(chosen) {
-    const q=currentQuestions()[index];
-    const correct=[...q.answer].sort().join('|')===[...chosen].sort().join('|');
-    if(!correct){
-      submitted=false;
-      document.querySelectorAll('[data-quiz-option]').forEach(button=>{if(chosen.includes(button.dataset.quizOption))button.classList.add('is-wrong');});
-      const feedback=document.getElementById('boiQuizFeedback');feedback.innerHTML='<p class="boi-quiz-retry">Not quite. Review the choices and try again; the seven-point review appears after the correct answer.</p>';
-      return;
-    }
-    submitted=true;revealSolved=true;solved.add(q.id);save();render();
-  }
-  document.getElementById('boiQuizTab').onclick=startQuiz;
-  window.startBoiQuiz=startQuiz;
+  function save(){localStorage.setItem(KEY,JSON.stringify({topic:selectedGroups.length===1?selectedGroups[0].split('::')[0]:'__all',groups:selectedGroups,order,index,solved:[...solved],revealSolved}));}
+  function beginRun(){const pool=chosenQuestions();order=shuffle(pool.filter(q=>!solved.has(q.id)).map(q=>q.id)).concat(shuffle(pool.filter(q=>solved.has(q.id)).map(q=>q.id)));index=0;selection.clear();submitted=false;revealSolved=false;save();syncPicker();render();}
+  const restoreValid=order.length>0&&order.every(id=>chosenQuestions().some(q=>q.id===id));
+  if(!restoreValid)order=shuffle(chosenQuestions().filter(q=>!solved.has(q.id)).map(q=>q.id));
+  function activeQuestion(){return QUESTIONS.find(q=>q.id===order[index]);}
+  function startQuiz(){document.getElementById('boiQuizTab').classList.add('active');document.getElementById('boiQuizTab').setAttribute('aria-pressed','true');const examTab=document.getElementById('examTab');examTab.classList.remove('active');examTab.setAttribute('aria-pressed','false');document.querySelector('.shell').classList.add('exam-mode');const layout=document.querySelector('.layout');layout.classList.add('exam-mode','quiz-mode');['practiceView','learnView','bookmarksView','notesView','notebookView','examView','boiView','finalBoiView'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});document.getElementById('boiQuizView').style.display='block';render();}
+  function render(){const pool=chosenQuestions(), completed=pool.filter(q=>solved.has(q.id)).length;progress.textContent=`${completed} of ${pool.length} correct`;bar.style.width=`${pool.length?completed/pool.length*100:0}%`;syncPicker();if(completed===pool.length){root.innerHTML=`<section class="boi-quiz-finish"><span class="pill">${escape(selectedGroups.length?selectedGroups.map(groupLabel).join(', ').toUpperCase():'ALL TOPICS')}</span><h3>Quiz complete</h3><p>${completed}/${pool.length} correct · Each seven-point review appeared after its correct answer.</p><button type="button" class="boi-quiz-next" id="boiQuizRestart">Start again</button></section>`;document.getElementById('boiQuizRestart').onclick=()=>{pool.forEach(q=>solved.delete(q.id));beginRun();};return;}while(index<order.length&&solved.has(order[index])&&!revealSolved)index++;if(index>=order.length){order=shuffle(pool.filter(q=>!solved.has(q.id)).map(q=>q.id));index=0;}const q=activeQuestion();if(!q){root.innerHTML='<section class="boi-quiz-finish"><h3>No questions in this selection</h3></section>';return;}const isSolved=solved.has(q.id), answeredText=ids=>ids.map(id=>`${id}: ${q.options.find(o=>o[0]===id)?.[1]||''}`).join('; '),reviews=[['2. Your answer vs correct answer',`Your answer: ${answeredText(q.previousAnswer||q.answer)}<br>Correct answer: ${answeredText(q.answer)}`],['3. Exact expected output',q.expected],['4. Step-by-step execution',q.steps],['5. Concept explained from basics',q.concept],['6. Explanation of every option',q.optionReview],['7. Exam takeaway',q.takeaway]],optionsHtml=q.options.map(([id,text])=>`<button type="button" class="boi-quiz-option ${isSolved&&q.answer.includes(id)?'is-correct':''}" data-quiz-option="${id}" aria-pressed="false"><span class="boi-quiz-letter">${id}</span><span>${escape(text)}</span></button>`).join('');root.innerHTML=`<article class="boi-quiz-question"><div class="boi-quiz-qhead"><span class="pill">${escape(q.id)} · ${escape(q.title)}</span><span>${groupLabel(groupKey(q))} · Question ${completed+1} of ${pool.length}</span></div><h3 class="boi-quiz-prompt">${escape(q.question)}</h3>${q.multi?'<p class="boi-quiz-hint">Select all that apply, then check your answer.</p>':''}<div class="boi-quiz-options">${optionsHtml}</div>${q.multi?'<button type="button" class="boi-quiz-next" id="boiQuizCheck">Check answer</button>':''}<div id="boiQuizFeedback" aria-live="polite">${isSolved?`<p class="boi-quiz-correct-note">Correct — your seven-point review:</p><div class="boi-quiz-reviews">${reviews.map(([title,body])=>`<section><h4>${escape(title)}</h4><p>${body.includes('<br>')?body:escape(body).replace(/\n/g,'<br>')}</p></section>`).join('')}</div><button type="button" class="boi-quiz-next" id="boiQuizNext">Next question →</button>`:''}</div></article>`;root.querySelectorAll('[data-quiz-option]').forEach(button=>button.onclick=()=>{if(isSolved||submitted)return;const id=button.dataset.quizOption;if(q.multi){if(selection.has(id))selection.delete(id);else selection.add(id);button.classList.toggle('is-selected',selection.has(id));button.classList.remove('is-wrong');button.setAttribute('aria-pressed',String(selection.has(id)));}else check([id]);});if(q.multi)document.getElementById('boiQuizCheck').onclick=()=>check([...selection]);if(isSolved)document.getElementById('boiQuizNext').onclick=()=>{index++;selection.clear();submitted=false;revealSolved=false;save();render();};}
+  function check(chosen){const q=activeQuestion(),correct=[...q.answer].sort().join('|')===[...chosen].sort().join('|');if(!correct){submitted=false;document.querySelectorAll('[data-quiz-option]').forEach(button=>{if(chosen.includes(button.dataset.quizOption))button.classList.add('is-wrong');});document.getElementById('boiQuizFeedback').innerHTML='<p class="boi-quiz-retry">Not quite. Review the choices and try again; the seven-point review appears after the correct answer.</p>';return;}submitted=true;revealSolved=true;solved.add(q.id);save();render();}
+  allBox.onchange=()=>{selectedGroups=[];beginRun();};toggle.onclick=()=>{const open=menu.hidden;menu.hidden=!open;toggle.setAttribute('aria-expanded',String(open));};document.addEventListener('click',e=>{if(!e.target.closest('.boi-quiz-topic-filter')){menu.hidden=true;toggle.setAttribute('aria-expanded','false');}});document.addEventListener('keydown',e=>{if(e.key==='Escape'){menu.hidden=true;toggle.setAttribute('aria-expanded','false');}});
+  document.getElementById('boiQuizTab').onclick=startQuiz;window.startBoiQuiz=startQuiz;syncPicker();save();
 })();
